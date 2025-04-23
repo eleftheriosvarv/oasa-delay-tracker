@@ -1,8 +1,23 @@
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import psycopg2
 import os
 from datetime import datetime
+
+def create_session():
+    session = requests.Session()
+    retry = Retry(
+        total=1,
+        backoff_factor=0.3,
+        status_forcelist=[429, 500, 502, 503, 504],
+        raise_on_status=False
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
 
 def get_db_connection():
     db_url = os.environ.get("DB_URL")
@@ -10,10 +25,10 @@ def get_db_connection():
         raise Exception("DB_URL environment variable not found")
     return psycopg2.connect(db_url)
 
-def fetch_arrivals(stopcode, route_code):
+def fetch_arrivals(session, stopcode, route_code):
     url = f"https://telematics.oasa.gr/api/?act=getStopArrivals&p1={stopcode}"
     try:
-        response = requests.get(url, timeout=10)
+        response = session.get(url, timeout=10)
         data = response.json()
 
         if isinstance(data, dict) and isinstance(data.get("arrivals", None), list):
@@ -75,14 +90,15 @@ def main():
     df_unique = df[["route_code", "stopcode"]].drop_duplicates()
 
     all_results = []
+    session = create_session()
     print("🚀 Starting OASA API collection...")
 
     for index, row in df_unique.iterrows():
         route_code = row["route_code"]
         stopcode = row["stopcode"]
 
-        print(f"🔎 Fetching stop={stopcode}, route={route_code}")
-        results = fetch_arrivals(stopcode, route_code)
+        print(f"🔍 Fetching stop={stopcode}, route={route_code}")
+        results = fetch_arrivals(session, stopcode, route_code)
         all_results.extend(results)
 
     print(f"📦 Total records to insert: {len(all_results)}")
@@ -92,10 +108,7 @@ def main():
         clean_and_store(pd.DataFrame(all_results), conn)
         conn.close()
 
-    print("🎉 DONE.")
+    print("DONE.")
 
 if __name__ == "__main__":
     main()
-
-
-
