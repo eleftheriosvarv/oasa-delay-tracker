@@ -6,20 +6,12 @@ import psycopg2
 import os
 from datetime import datetime
 from dotenv import load_dotenv
+
 load_dotenv()
-
-
-# Only the 5 reliable stopcodes for route 2085
-STOPCODES = [10374, 61011, 60985, 60010, 60011]
-ROUTE_CODE = 2085
 
 def create_session():
     session = requests.Session()
-    retry = Retry(
-        total=0,  # no retries
-        backoff_factor=0,
-        raise_on_status=False
-    )
+    retry = Retry(total=0, backoff_factor=0, raise_on_status=False)
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
@@ -31,7 +23,7 @@ def get_db_connection():
         raise Exception("DB_URL environment variable not found")
     return psycopg2.connect(db_url)
 
-def fetch_arrivals(session, stopcode):
+def fetch_arrivals(session, stopcode, route_code):
     url = f"https://telematics.oasa.gr/api/?act=getStopArrivals&p1={stopcode}"
     try:
         response = session.get(url, timeout=20)
@@ -40,14 +32,14 @@ def fetch_arrivals(session, stopcode):
         if isinstance(data, dict) and isinstance(data.get("arrivals", None), list):
             return [
                 {
-                    "stopcode": stopcode,
-                    "route_code": ROUTE_CODE,
+                    "stopcode": int(stopcode),
+                    "route_code": int(route_code),
                     "veh_code": int(arrival["veh_code"]),
                     "btime2": int(arrival["btime2"]),
                     "timestamp": datetime.now()
                 }
                 for arrival in data["arrivals"]
-                if arrival.get("route_code") == str(ROUTE_CODE)
+                if arrival.get("route_code") == str(route_code)
             ]
         return []
     except Exception as e:
@@ -56,14 +48,18 @@ def fetch_arrivals(session, stopcode):
 
 def clean_and_store(data_df, conn):
     data_df = data_df.dropna(subset=["veh_code", "btime2"])
-    data_df["veh_code"] = data_df["veh_code"].astype(int)
-    data_df["btime2"] = data_df["btime2"].astype(int)
+    data_df = data_df.astype({
+        "veh_code": "int",
+        "btime2": "int",
+        "stopcode": "int",
+        "route_code": "int"
+    })
 
     for _, row in data_df.iterrows():
-        stopcode = int(row["stopcode"])
-        route_code = int(row["route_code"])
-        veh_code = int(row["veh_code"])
-        btime2 = int(row["btime2"])
+        stopcode = row["stopcode"]
+        route_code = row["route_code"]
+        veh_code = row["veh_code"]
+        btime2 = row["btime2"]
         timestamp = row["timestamp"]
 
         cursor = conn.cursor()
@@ -79,8 +75,7 @@ def clean_and_store(data_df, conn):
         if prev:
             prev_time, prev_btime2 = prev
             time_diff = (timestamp - prev_time).total_seconds() / 60
-            delay = (prev_btime2 - btime2) - time_diff
-            delay = round(delay)
+            delay = round((prev_btime2 - btime2) - time_diff)
 
         cursor.execute("""
             INSERT INTO oasa_arrivals (timestamp, stopcode, route_code, veh_code, btime2, delay)
@@ -89,29 +84,33 @@ def clean_and_store(data_df, conn):
         """, (timestamp, stopcode, route_code, veh_code, btime2, delay))
 
         conn.commit()
+        cursor.close()
         print(f"✅ Inserted: stop={stopcode}, veh={veh_code}, delay={delay}")
 
 def main():
     session = create_session()
-    all_results = []
+    df = pd.read_csv("stops_selected_lines_renamed.csv")
+    conn = get_db_connection()
 
-    print("🚀 Fetching OASA arrivals for route 2085...")
+    total_valid = 0
 
-    for stopcode in STOPCODES:
-        print(f"🔍 Fetching stop={stopcode}")
-        results = fetch_arrivals(session, stopcode)
-        all_results.extend(results)
+    for _, row in df.drop_duplicates(subset=["stopcode", "route_code"]).iterrows():
+        stopcode = row["stopcode"]
+        route_code = row["route_code"]
 
-    print(f"📦 Total valid rows: {len(all_results)}")
+        print(f"🔄 Fetching stop={stopcode}, route={route_code}")
+        results = fetch_arrivals(session, stopcode, route_code)
 
-    if all_results:
-        conn = get_db_connection()
-        clean_and_store(pd.DataFrame(all_results), conn)
-        conn.close()
+        if results:
+            clean_and_store(pd.DataFrame(results), conn)
+            total_valid += len(results)
 
+    conn.close()
+    print(f"📦 Total inserted rows: {total_valid}")
     print("🎉 DONE.")
 
 if __name__ == "__main__":
     main()
+
 
 
