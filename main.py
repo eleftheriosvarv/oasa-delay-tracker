@@ -117,7 +117,7 @@ if __name__ == "__main__":
 """
 
 # Save to a new Python file
-output_path = "/mnt/data/main_fixed.py"
+output_path = "/mnt/data/main.py"
 with open(output_path, "w", encoding="utf-8") as f:
     f.write(updated_main_py)
 
