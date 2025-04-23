@@ -6,12 +6,15 @@ import psycopg2
 import os
 from datetime import datetime
 
+# Only the 5 reliable stopcodes for route 2085
+STOPCODES = [10374, 61011, 60985, 60010, 60011]
+ROUTE_CODE = 2085
+
 def create_session():
     session = requests.Session()
     retry = Retry(
-        total=1,
-        backoff_factor=0.3,
-        status_forcelist=[429, 500, 502, 503, 504],
+        total=0,  # no retries
+        backoff_factor=0,
         raise_on_status=False
     )
     adapter = HTTPAdapter(max_retries=retry)
@@ -25,27 +28,27 @@ def get_db_connection():
         raise Exception("DB_URL environment variable not found")
     return psycopg2.connect(db_url)
 
-def fetch_arrivals(session, stopcode, route_code):
+def fetch_arrivals(session, stopcode):
     url = f"https://telematics.oasa.gr/api/?act=getStopArrivals&p1={stopcode}"
     try:
-        response = session.get(url, timeout=10)
+        response = session.get(url, timeout=5)
         data = response.json()
 
         if isinstance(data, dict) and isinstance(data.get("arrivals", None), list):
             return [
                 {
                     "stopcode": stopcode,
-                    "route_code": route_code,
+                    "route_code": ROUTE_CODE,
                     "veh_code": int(arrival["veh_code"]),
                     "btime2": int(arrival["btime2"]),
                     "timestamp": datetime.now()
                 }
                 for arrival in data["arrivals"]
-                if arrival.get("route_code") == str(route_code)
+                if arrival.get("route_code") == str(ROUTE_CODE)
             ]
         return []
     except Exception as e:
-        print(f"⚠️ Error for stop {stopcode}, route {route_code}: {e}")
+        print(f"⚠️ Error for stop {stopcode}: {e}")
         return []
 
 def clean_and_store(data_df, conn):
@@ -83,28 +86,20 @@ def clean_and_store(data_df, conn):
         """, (timestamp, stopcode, route_code, veh_code, btime2, delay))
 
         conn.commit()
-        print(f"✅ Inserted: stop={stopcode}, route={route_code}, veh={veh_code}, btime2={btime2}, delay={delay}")
+        print(f"✅ Inserted: stop={stopcode}, veh={veh_code}, delay={delay}")
 
 def main():
-    ROUTE_TO_TEST = 2085  # 🔁 Change this if you want another route
-
-    df = pd.read_csv("stops_selected_lines_renamed.csv")
-    df_route = df[df["route_code"] == ROUTE_TO_TEST]
-    df_unique = df_route[["route_code", "stopcode"]].drop_duplicates()
-
-    all_results = []
     session = create_session()
-    print(f"🚀 Starting OASA API collection for route {ROUTE_TO_TEST}...")
+    all_results = []
 
-    for index, row in df_unique.iterrows():
-        route_code = row["route_code"]
-        stopcode = row["stopcode"]
+    print("🚀 Fetching OASA arrivals for route 2085...")
 
-        print(f"🔍 Fetching stop={stopcode}, route={route_code}")
-        results = fetch_arrivals(session, stopcode, route_code)
+    for stopcode in STOPCODES:
+        print(f"🔍 Fetching stop={stopcode}")
+        results = fetch_arrivals(session, stopcode)
         all_results.extend(results)
 
-    print(f"📦 Total records to insert: {len(all_results)}")
+    print(f"📦 Total valid rows: {len(all_results)}")
 
     if all_results:
         conn = get_db_connection()
@@ -115,4 +110,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
