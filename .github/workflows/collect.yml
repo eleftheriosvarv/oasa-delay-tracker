@@ -9,6 +9,9 @@ jobs:
   run-script:
     runs-on: ubuntu-latest
 
+    env:
+      DB_URL: ${{ secrets.DB_URL }}
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
@@ -21,10 +24,9 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install pandas requests psycopg2-binary python-dotenv
 
-    - name: Run the Python script
-      env:
-        DB_URL: ${{ secrets.DB_URL }}
-      run: python main.py
+    - name: Run main_fixed.py script
+      run: |
+        python main_fixed.py
 
