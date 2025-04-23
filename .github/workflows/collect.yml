@@ -1,34 +1,29 @@
-name: OASA Data Collector
+name: Run OASA Delay Tracker
 
 on:
   schedule:
-    - cron: "*/10 4-17 * * *"
-  workflow_dispatch:
+    - cron: '*/5 4-18 * * *'  # UTC = 7:00–21:00 Greece (UTC+3)
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
-
     env:
       DB_URL: ${{ secrets.DB_URL }}
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas requests psycopg2-binary python-dotenv
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: Run main.py script
-      run: |
-        python main.py
-  
+      - name: Run main script
+        run: python main.py
 
 
