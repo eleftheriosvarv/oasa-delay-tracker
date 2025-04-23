@@ -86,12 +86,15 @@ def clean_and_store(data_df, conn):
         print(f"✅ Inserted: stop={stopcode}, route={route_code}, veh={veh_code}, btime2={btime2}, delay={delay}")
 
 def main():
+    ROUTE_TO_TEST = 2085  # 🔁 Change this if you want another route
+
     df = pd.read_csv("stops_selected_lines_renamed.csv")
-    df_unique = df[["route_code", "stopcode"]].drop_duplicates()
+    df_route = df[df["route_code"] == ROUTE_TO_TEST]
+    df_unique = df_route[["route_code", "stopcode"]].drop_duplicates()
 
     all_results = []
     session = create_session()
-    print("🚀 Starting OASA API collection...")
+    print(f"🚀 Starting OASA API collection for route {ROUTE_TO_TEST}...")
 
     for index, row in df_unique.iterrows():
         route_code = row["route_code"]
@@ -108,7 +111,8 @@ def main():
         clean_and_store(pd.DataFrame(all_results), conn)
         conn.close()
 
-    print("DONE.")
+    print("🎉 DONE.")
 
 if __name__ == "__main__":
     main()
+
