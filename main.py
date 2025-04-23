@@ -5,6 +5,9 @@ from urllib3.util.retry import Retry
 import psycopg2
 import os
 from datetime import datetime
+from dotenv import load_dotenv
+load_dotenv()
+
 
 # Only the 5 reliable stopcodes for route 2085
 STOPCODES = [10374, 61011, 60985, 60010, 60011]
