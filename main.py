@@ -1,127 +1,94 @@
-# Save the updated main.py file as requested by the user
-
-updated_main_py = """
 import pandas as pd
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 import psycopg2
-import os
 from datetime import datetime
+from time import sleep
+import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-def create_session():
-    session = requests.Session()
-    retry = Retry(total=0, backoff_factor=0, raise_on_status=False)
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    return session
+DB_URL = os.getenv("DB_URL")
 
-def get_db_connection():
-    db_url = os.environ.get("DB_URL")
-    if not db_url:
-        raise Exception("DB_URL environment variable not found")
-    return psycopg2.connect(db_url)
-
-def fetch_arrivals(session, stopcode, route_code):
-    url = f"https://telematics.oasa.gr/api/?act=getStopArrivals&p1={stopcode}"
-    try:
-        response = session.get(url, timeout=20)
-        data = response.json()
-
-        if isinstance(data, dict) and isinstance(data.get("arrivals", None), list):
-            return [
-                {
-                    "stopcode": int(stopcode),
-                    "route_code": int(route_code),
-                    "veh_code": int(arrival["veh_code"]),
-                    "btime2": int(arrival["btime2"]),
-                    "timestamp": datetime.now()
-                }
-                for arrival in data["arrivals"]
-                if arrival.get("route_code") == str(route_code)
-            ]
-        return []
-    except Exception as e:
-        print(f"⚠️ Error for stop {stopcode}: {e}")
-        return []
-
-def clean_and_store(data_df, conn):
+def clean_and_store(data_df, db_connection):
+    now = datetime.now()
     data_df = data_df.dropna(subset=["veh_code", "btime2"])
-    data_df = data_df.astype({
-        "veh_code": "int",
-        "btime2": "int",
-        "stopcode": "int",
-        "route_code": "int"
-    })
+    data_df["veh_code"] = data_df["veh_code"].astype(int)
+    data_df["btime2"] = data_df["btime2"].astype(int)
 
     for _, row in data_df.iterrows():
-        stopcode = row["stopcode"]
-        route_code = row["route_code"]
-        veh_code = row["veh_code"]
-        btime2 = row["btime2"]
-        timestamp = row["timestamp"]
+        stopcode = int(row["stopcode"])
+        route_code = int(row["route_code"])
+        veh_code = int(row["veh_code"])
+        btime2 = int(row["btime2"])
 
-        cursor = conn.cursor()
+        cursor = db_connection.cursor()
 
-        cursor.execute(\"""
+        cursor.execute(
+            """
             SELECT timestamp, btime2 FROM oasa_arrivals
             WHERE stopcode = %s AND veh_code = %s
             ORDER BY timestamp DESC LIMIT 1
-        \""", (stopcode, veh_code))
+            """,
+            (stopcode, veh_code),
+        )
         prev = cursor.fetchone()
 
         delay = None
         if prev:
             prev_time, prev_btime2 = prev
-            time_diff = (timestamp - prev_time).total_seconds() / 60
+            time_diff = (now - prev_time).total_seconds() / 60
             delay = round((prev_btime2 - btime2) - time_diff)
 
-        cursor.execute(\"""
+        cursor.execute(
+            """
             INSERT INTO oasa_arrivals (timestamp, stopcode, route_code, veh_code, btime2, delay)
             VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT DO NOTHING
-        \""", (timestamp, stopcode, route_code, veh_code, btime2, delay))
+            ON CONFLICT (timestamp, stopcode, veh_code) DO NOTHING
+            """,
+            (now, stopcode, route_code, veh_code, btime2, delay),
+        )
 
-        conn.commit()
+        db_connection.commit()
         cursor.close()
-        print(f"✅ Inserted: stop={stopcode}, veh={veh_code}, delay={delay}")
 
 def main():
-    session = create_session()
+    print("📍 Reading CSV...")
     df = pd.read_csv("stops_selected_lines_renamed.csv")
-    conn = get_db_connection()
+    grouped = df.groupby("route_code")
 
-    total_valid = 0
+    conn = psycopg2.connect(DB_URL)
 
-    for _, row in df.drop_duplicates(subset=["stopcode", "route_code"]).iterrows():
-        stopcode = row["stopcode"]
-        route_code = row["route_code"]
+    for route_code, group in grouped:
+        print(f"🚏 Fetching OASA arrivals for route {route_code}...")
+        valid = 0
+        for stopcode in group["stopcode"]:
+            print(f"🔎 Fetching stop={stopcode}, route={route_code}")
+            try:
+                response = requests.get(
+                    f"https://telematics.oasa.gr/api/?act=getStopArrivals&p1={stopcode}",
+                    timeout=20,
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if isinstance(data, dict) and isinstance(data.get("arrivals"), list):
+                        arrivals_df = pd.DataFrame(data["arrivals"])
+                        if not arrivals_df.empty:
+                            arrivals_df["stopcode"] = stopcode
+                            arrivals_df["route_code"] = route_code
+                            clean_and_store(arrivals_df, conn)
+                            valid += 1
+            except Exception as e:
+                print(f"⚠️ Error for stop {stopcode}, route {route_code}: {e}")
+            sleep(1)
 
-        print(f"🔄 Fetching stop={stopcode}, route={route_code}")
-        results = fetch_arrivals(session, stopcode, route_code)
-
-        if results:
-            clean_and_store(pd.DataFrame(results), conn)
-            total_valid += len(results)
+        print(f"📊 Total valid rows: {valid}")
+        print("🎉 DONE.")
 
     conn.close()
-    print(f"📦 Total inserted rows: {total_valid}")
-    print("🎉 DONE.")
 
 if __name__ == "__main__":
     main()
-"""
-
-# Save to a new Python file
-output_path = "/mnt/data/main.py"
-with open(output_path, "w", encoding="utf-8") as f:
-    f.write(updated_main_py)
-
-output_path
 
 
 
