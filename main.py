@@ -1,3 +1,6 @@
+# Save the updated main.py file as requested by the user
+
+updated_main_py = """
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
@@ -64,11 +67,11 @@ def clean_and_store(data_df, conn):
 
         cursor = conn.cursor()
 
-        cursor.execute("""
+        cursor.execute(\"""
             SELECT timestamp, btime2 FROM oasa_arrivals
             WHERE stopcode = %s AND veh_code = %s
             ORDER BY timestamp DESC LIMIT 1
-        """, (stopcode, veh_code))
+        \""", (stopcode, veh_code))
         prev = cursor.fetchone()
 
         delay = None
@@ -77,11 +80,11 @@ def clean_and_store(data_df, conn):
             time_diff = (timestamp - prev_time).total_seconds() / 60
             delay = round((prev_btime2 - btime2) - time_diff)
 
-        cursor.execute("""
+        cursor.execute(\"""
             INSERT INTO oasa_arrivals (timestamp, stopcode, route_code, veh_code, btime2, delay)
             VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT DO NOTHING
-        """, (timestamp, stopcode, route_code, veh_code, btime2, delay))
+        \""", (timestamp, stopcode, route_code, veh_code, btime2, delay))
 
         conn.commit()
         cursor.close()
@@ -111,6 +114,15 @@ def main():
 
 if __name__ == "__main__":
     main()
+"""
+
+# Save to a new Python file
+output_path = "/mnt/data/main_fixed.py"
+with open(output_path, "w", encoding="utf-8") as f:
+    f.write(updated_main_py)
+
+output_path
+
 
 
 
