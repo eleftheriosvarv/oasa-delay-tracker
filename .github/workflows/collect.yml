@@ -26,7 +26,9 @@ jobs:
         python -m pip install --upgrade pip
         pip install pandas requests psycopg2-binary python-dotenv
 
-    - name: Run main_fixed.py script
+    - name: Run main.py script
       run: |
-        python main_fixed.py
+        python main.py
+  
+
 
