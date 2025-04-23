@@ -31,7 +31,7 @@ def get_db_connection():
 def fetch_arrivals(session, stopcode):
     url = f"https://telematics.oasa.gr/api/?act=getStopArrivals&p1={stopcode}"
     try:
-        response = session.get(url, timeout=5)
+        response = session.get(url, timeout=20)
         data = response.json()
 
         if isinstance(data, dict) and isinstance(data.get("arrivals", None), list):
