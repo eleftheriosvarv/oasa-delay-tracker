@@ -1,0 +1,32 @@
+name: Run OASA Data Collector
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'  # κάθε 10 λεπτά
+  workflow_dispatch:       # και χειροκίνητα αν χρειαστεί
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    env:
+      DB_URL: ${{ secrets.DB_URL }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas requests psycopg2-binary python-dotenv
+
+    - name: Run main.py script
+      run: |
+        echo "🚀 Starting script..."
+        python main_fixed.py
