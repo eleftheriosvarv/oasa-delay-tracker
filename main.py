@@ -1,57 +1,51 @@
 import pandas as pd
 import requests
 import psycopg2
-from datetime import datetime
-from urllib.parse import urlparse
 import os
-import time
+from datetime import datetime
 
-def fetch_arrivals(input_file):
-    df = pd.read_csv(input_file)
-    df_unique = df[['stopcode', 'route_code']].drop_duplicates()
+def get_db_connection():
+    db_url = os.environ.get("DB_URL")
+    if not db_url:
+        raise Exception("DB_URL environment variable not found")
+    return psycopg2.connect(db_url)
 
-    results = []
+def fetch_arrivals(stopcode, route_code):
+    url = f"https://telematics.oasa.gr/api/?act=getStopArrivals&p1={stopcode}"
+    try:
+        response = requests.get(url, timeout=10)
+        data = response.json()
 
-    for _, row in df_unique.iterrows():
-        stopcode = str(row['stopcode'])
-        route_code = str(row['route_code'])
+        if isinstance(data, dict) and isinstance(data.get("arrivals", None), list):
+            return [
+                {
+                    "stopcode": stopcode,
+                    "route_code": route_code,
+                    "veh_code": int(arrival["veh_code"]),
+                    "btime2": int(arrival["btime2"]),
+                    "timestamp": datetime.now()
+                }
+                for arrival in data["arrivals"]
+                if arrival.get("route_code") == str(route_code)
+            ]
+        return []
+    except Exception as e:
+        print(f"⚠️ Error for stop {stopcode}, route {route_code}: {e}")
+        return []
 
-        try:
-            url = f"https://telematics.oasa.gr/api/?act=getStopArrivals&p1={stopcode}"
-            response = requests.get(url)
-            response.raise_for_status()
-            data = response.json()
-            arrivals = data if isinstance(data, list) else data.get("arrivals", [])
-
-            for arrival in arrivals:
-                if str(arrival.get("route_code")) == route_code:
-                    results.append({
-                        "stopcode": stopcode,
-                        "route_code": route_code,
-                        "veh_code": arrival.get("veh_code"),
-                        "btime2": arrival.get("btime2")
-                    })
-
-        except Exception as e:
-            print(f"Error fetching {stopcode}/{route_code}: {e}")
-
-        time.sleep(0.4)
-
-    return pd.DataFrame(results)
-
-def clean_and_store(data_df, db_connection):
-    now = datetime.now()
-    data_df = data_df.dropna(subset=['veh_code', 'btime2'])
-    data_df['veh_code'] = data_df['veh_code'].astype(int)
-    data_df['btime2'] = data_df['btime2'].astype(int)
+def clean_and_store(data_df, conn):
+    data_df = data_df.dropna(subset=["veh_code", "btime2"])
+    data_df["veh_code"] = data_df["veh_code"].astype(int)
+    data_df["btime2"] = data_df["btime2"].astype(int)
 
     for _, row in data_df.iterrows():
-        stopcode = int(row['stopcode'])
-        route_code = int(row['route_code'])
-        veh_code = int(row['veh_code'])
-        btime2 = int(row['btime2'])
+        stopcode = int(row["stopcode"])
+        route_code = int(row["route_code"])
+        veh_code = int(row["veh_code"])
+        btime2 = int(row["btime2"])
+        timestamp = row["timestamp"]
 
-        cursor = db_connection.cursor()
+        cursor = conn.cursor()
 
         cursor.execute("""
             SELECT timestamp, btime2 FROM oasa_arrivals
@@ -63,7 +57,7 @@ def clean_and_store(data_df, db_connection):
         delay = None
         if prev:
             prev_time, prev_btime2 = prev
-            time_diff = (now - prev_time).total_seconds() / 60
+            time_diff = (timestamp - prev_time).total_seconds() / 60
             delay = (prev_btime2 - btime2) - time_diff
             delay = round(delay)
 
@@ -71,31 +65,37 @@ def clean_and_store(data_df, db_connection):
             INSERT INTO oasa_arrivals (timestamp, stopcode, route_code, veh_code, btime2, delay)
             VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT DO NOTHING
-        """, (now, stopcode, route_code, veh_code, btime2, delay))
+        """, (timestamp, stopcode, route_code, veh_code, btime2, delay))
 
-        db_connection.commit()
+        conn.commit()
+        print(f"✅ Inserted: stop={stopcode}, route={route_code}, veh={veh_code}, btime2={btime2}, delay={delay}")
 
 def main():
-    # Get DB connection
-    db_url = os.environ["DB_URL"]
-    result = urlparse(db_url)
-    conn = psycopg2.connect(
-        host=result.hostname,
-        port=result.port,
-        dbname=result.path.lstrip('/'),
-        user=result.username,
-        password=result.password
-    )
+    df = pd.read_csv("stops_selected_lines_renamed.csv")
+    df_unique = df[["route_code", "stopcode"]].drop_duplicates()
 
-    # Fetch live data
-    df = fetch_arrivals("stops_selected_lines_renamed.csv")
+    all_results = []
+    print("🚀 Starting OASA API collection...")
 
-    # Clean and store in DB
-    clean_and_store(df, conn)
+    for index, row in df_unique.iterrows():
+        route_code = row["route_code"]
+        stopcode = row["stopcode"]
 
-    conn.close()
+        print(f"🔎 Fetching stop={stopcode}, route={route_code}")
+        results = fetch_arrivals(stopcode, route_code)
+        all_results.extend(results)
+
+    print(f"📦 Total records to insert: {len(all_results)}")
+
+    if all_results:
+        conn = get_db_connection()
+        clean_and_store(pd.DataFrame(all_results), conn)
+        conn.close()
+
+    print("🎉 DONE.")
 
 if __name__ == "__main__":
     main()
+
 
 
