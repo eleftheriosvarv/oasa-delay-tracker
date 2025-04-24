@@ -16,12 +16,16 @@ route_code = "2085"
 
 results = []
 
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+}
+
 for _, row in df_unique.iterrows():
     stopcode = str(row['StopCode'])
 
     try:
         url = f"https://telematics.oasa.gr/api/?act=getStopArrivals&p1={stopcode}"
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=10, headers=headers)
         response.raise_for_status()
         data = response.json()
 
@@ -69,6 +73,7 @@ if results:
     print(f"Stored {len(df_results)} records.", flush=True)
 else:
     print("No results to store.", flush=True)
+
 
 
 
