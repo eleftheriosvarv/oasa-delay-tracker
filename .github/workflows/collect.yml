@@ -1,9 +1,9 @@
 name: Run OASA Delay Tracker
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "*/10 * * * *"  # κάθε 10 λεπτά
+    - cron: "0 4-18 * * *"  # Every hour from 07:00 to 21:00 EET (UTC+3)
+  workflow_dispatch:
 
 jobs:
   run-script:
@@ -26,9 +26,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run main optimized script
+      - name: Run main script
         run: |
-          python oasa-delay-tracker-main/main_optimized.py
+          python oasa-delay-tracker-main/main.py
+
 
 
 
