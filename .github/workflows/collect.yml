@@ -1,16 +1,13 @@
-name: Run OASA Delay Tracker
+name: Collect OASA 2085 Data
 
 on:
   schedule:
-    - cron: "0 4-18 * * *"  # Every hour from 07:00 to 21:00 EET (UTC+3)
+    - cron: "*/10 4-18 * * *"  # Every 10 min, from 04:00 to 18:59 UTC
   workflow_dispatch:
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
-
-    env:
-      DB_URL: ${{ secrets.DB_URL }}
 
     steps:
       - name: Checkout repository
@@ -23,13 +20,12 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run main script
+      - name: Run data collector
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
         run: |
           python main.py
-
-
 
 
